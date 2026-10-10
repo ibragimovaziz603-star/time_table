@@ -19,12 +19,12 @@ class DashboardController extends Controller
             abort(403, 'Siz hech qanday guruhga starosta emassiz.');
         }
 
-        $dayMap = [
-            1 => 'Du', 2 => 'Se', 3 => 'Chor', 4 => 'Pay', 5 => 'Ju', 6 => 'Shan', 7 => 'Shan',
-        ];
-        $todayShort = $dayMap[now()->dayOfWeek] ?? 'Du';
-        $todayDay = Day::where('short', $todayShort)->first();
+        // Bugungi kun
+        $dayMap = [0 => 'Yak', 1 => 'Du', 2 => 'Se', 3 => 'Chor', 4 => 'Pay', 5 => 'Ju', 6 => 'Shan'];
+        $todayShort = $dayMap[now()->dayOfWeek] ?? null;
+        $todayDay = $todayShort ? Day::where('short', $todayShort)->first() : null;
 
+        // Bugungi darslar
         $todaySchedules = collect();
         if ($todayDay) {
             $todaySchedules = Schedule::with(['subject', 'teacher', 'room', 'period'])
@@ -34,16 +34,18 @@ class DashboardController extends Controller
                 ->get();
         }
 
+        // Talabalar
         $students = $group->students()
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get();
 
+        // Bugungi davomat (grid: student_id_schedule_id => status)
         $attendances = [];
         if ($todaySchedules->count() > 0) {
             $rows = Attendance::whereIn('student_id', $students->pluck('id'))
                 ->whereIn('schedule_id', $todaySchedules->pluck('id'))
-                ->where('date', today())
+                ->where('date', today()->toDateString())
                 ->get();
 
             foreach ($rows as $r) {
@@ -52,13 +54,14 @@ class DashboardController extends Controller
         }
 
         return view('starosta.journal', [
-            'group'          => $group,
+            'group' => $group,
             'todaySchedules' => $todaySchedules,
-            'todayName'      => $todayDay?->name ?? 'Bugun',
-            'students'       => $students,
-            'attendances'    => $attendances,
+            'todayName' => $todayDay?->name ?? 'Bugun',
+            'students' => $students,
+            'attendances' => $attendances,
         ]);
     }
+    
 
     public function save(Request $request)
     {
@@ -70,8 +73,8 @@ class DashboardController extends Controller
         }
 
         $data = $request->validate([
-            'attendance'     => 'array',
-            'attendance.*'   => 'array',
+            'attendance' => 'array',
+            'attendance.*' => 'array',
             'attendance.*.*' => 'in:b,s,nb',
         ]);
 
@@ -88,9 +91,9 @@ class DashboardController extends Controller
                 } else {
                     Attendance::updateOrCreate(
                         [
-                            'student_id'  => $studentId,
+                            'student_id' => $studentId,
                             'schedule_id' => $scheduleId,
-                            'date'        => $date,
+                            'date' => $date,
                         ],
                         ['status' => $status]
                     );

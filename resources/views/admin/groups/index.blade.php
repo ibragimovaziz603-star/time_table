@@ -35,7 +35,7 @@
         <th style="width:120px;">Kurs</th>
         <th style="width:120px;">Talabalar</th>
         <th style="width:120px;">Darslar</th>
-        <th style="width:140px;">Amallar</th>
+        <th style="width:140px;">Qamallar</th>
       </tr>
     </thead>
     <tbody>

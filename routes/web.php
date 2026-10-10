@@ -78,3 +78,6 @@ Route::middleware(['auth', 'starosta'])->prefix('starosta')->name('starosta.')->
     Route::get('/journal', [\App\Http\Controllers\Starosta\DashboardController::class, 'journal'])->name('journal');
     Route::post('/journal', [\App\Http\Controllers\Starosta\DashboardController::class, 'save'])->name('journal.save');
 });
+
+Route::post('groups/{group}/add-student', [GroupController::class, 'addStudent'])->name('groups.add-student');
+Route::delete('groups/{group}/remove-student/{student}', [GroupController::class, 'removeStudent'])->name('groups.remove-student');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -31,16 +32,21 @@ class GroupController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'name'    => 'required|string|max:50|unique:groups,name',
-            'course'  => 'nullable|integer|min:1|max:6',
+            'name'   => 'required|string|max:50|unique:groups,name',
+            'course' => 'nullable|integer|min:1|max:6',
         ], [
             'name.unique' => 'Bu guruh allaqachon mavjud.',
         ]);
 
-        Group::create([
+        $group = Group::create([
             'name'   => $data['name'],
             'course' => $data['course'] ?? null,
         ]);
+
+        // Kursni nomdan avtomatik aniqlash
+        if (method_exists($group, 'syncCourseFromName')) {
+            $group->syncCourseFromName();
+        }
 
         return redirect()->route('admin.groups.index')
                          ->with('ok', "Guruh qo'shildi.");
@@ -48,7 +54,20 @@ class GroupController extends Controller
 
     public function edit(Group $group)
     {
-        return view('admin.groups.form', compact('group'));
+        // Guruhdagi talabalar
+        $students = $group->students()
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get();
+
+        // Boshqa talabalar (qo'shish uchun)
+        $allStudents = User::where('role_id', 3)
+            ->whereNotIn('id', $students->pluck('id'))
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get();
+
+        return view('admin.groups.form', compact('group', 'students', 'allStudents'));
     }
 
     public function update(Request $request, Group $group)
@@ -65,7 +84,12 @@ class GroupController extends Controller
             'course' => $data['course'] ?? null,
         ]);
 
-        return redirect()->route('admin.groups.index')
+        // Kursni nomdan avtomatik aniqlash
+        if (method_exists($group, 'syncCourseFromName')) {
+            $group->syncCourseFromName();
+        }
+
+        return redirect()->route('admin.groups.edit', $group)
                          ->with('ok', 'Guruh yangilandi.');
     }
 
@@ -74,6 +98,29 @@ class GroupController extends Controller
         $name = $group->name;
         $group->delete();
 
-        return back()->with('ok', "\"{$name}\" guruhi va u bilan bog'liq ma'lumotlar o‘chirildi.");
+        return redirect()->route('admin.groups.index')
+                         ->with('ok', "\"{$name}\" guruhi va u bilan bog'liq ma'lumotlar o‘chirildi.");
+    }
+
+    /** Guruhga talaba qo'shish */
+    public function addStudent(Request $request, Group $group)
+    {
+        $data = $request->validate([
+            'student_id' => 'required|exists:users,id',
+        ]);
+
+        $group->students()->syncWithoutDetaching([$data['student_id']]);
+
+        return redirect()->route('admin.groups.edit', $group)
+                         ->with('ok', "Talaba guruhga qo'shildi.");
+    }
+
+    /** Guruhdan talaba olib tashlash */
+    public function removeStudent(Group $group, $studentId)
+    {
+        $group->students()->detach($studentId);
+
+        return redirect()->route('admin.groups.edit', $group)
+                         ->with('ok', "Talaba guruhdan olib tashlandi.");
     }
 }

@@ -3,46 +3,52 @@
 namespace App\Http\Controllers\Teacher;
 
 use App\Http\Controllers\Controller;
+use App\Models\Attendance;
 use App\Models\Day;
 use App\Models\Grade;
-use App\Models\Group;
-use App\Models\Period;
 use App\Models\Schedule;
-use App\Models\Subject;
-use App\Models\User;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
-    /** O'qituvchi bosh sahifasi */
+    /** O'qituvchi dashboard — bugungi darslar */
     public function index()
     {
         $teacher = auth()->user();
 
-        // Bugungi darslar
-        $today = Day::where('number', now()->dayOfWeek)->first();
+        // Bugungi kun
+        $dayMap = [0 => 'Yak', 1 => 'Du', 2 => 'Se', 3 => 'Chor', 4 => 'Pay', 5 => 'Ju', 6 => 'Shan'];
+        $todayShort = $dayMap[now()->dayOfWeek] ?? null;
+        $todayDay = $todayShort ? Day::where('short', $todayShort)->first() : null;
 
+        // Bugungi darslar
         $todayLessons = collect();
-        if ($today) {
+        if ($todayDay) {
             $todayLessons = Schedule::with(['group', 'subject', 'room', 'period'])
                 ->where('teacher_id', $teacher->id)
-                ->where('day_id', $today->id)
+                ->where('day_id', $todayDay->id)
                 ->orderBy('period_id')
                 ->get();
         }
 
         // Statistika
-        $totalSchedules = Schedule::where('teacher_id', $teacher->id)->count();
-        $totalGroups    = Schedule::where('teacher_id', $teacher->id)
-                            ->distinct('group_id')->count('group_id');
-        $totalSubjects  = $teacher->subjects()->count();
+        $stats = [
+            'groups' => Schedule::where('teacher_id', $teacher->id)
+                ->distinct('group_id')->count('group_id'),
+            'subjects' => Schedule::where('teacher_id', $teacher->id)
+                ->distinct('subject_id')->count('subject_id'),
+            'schedules' => Schedule::where('teacher_id', $teacher->id)->count(),
+        ];
 
         return view('teacher.dashboard', compact(
-            'teacher', 'todayLessons', 'totalSchedules', 'totalGroups', 'totalSubjects'
+            'teacher',
+            'todayDay',
+            'todayLessons',
+            'stats'
         ));
     }
 
-    /** Mening jadvalim — haftalik */
+    /** Haftalik jadval */
     public function mySchedule()
     {
         $teacher = auth()->user();
@@ -51,7 +57,6 @@ class DashboardController extends Controller
             ->where('teacher_id', $teacher->id)
             ->get();
 
-        // Grid: ['Du' => [1 => lesson, ...], ...]
         $grid = [];
         foreach ($schedules as $s) {
             $grid[$s->day->short][$s->period->number] = $s;
@@ -59,78 +64,145 @@ class DashboardController extends Controller
 
         return view('teacher.my-schedule', [
             'teacher' => $teacher,
-            'grid'    => $grid,
-            'days'    => Day::orderBy('number')->get(),
-            'periods' => Period::orderBy('number')->get(),
+            'grid' => $grid,
+            'days' => Day::orderBy('number')->get(),
+            'periods' => \App\Models\Period::orderBy('number')->get(),
         ]);
     }
 
-    /** Jurnal — guruhlar + fanlar ro'yxati */
+    /** Jurnal — bugungi darslar (guruh + fan) */
     public function journal()
     {
         $teacher = auth()->user();
 
-        // O'qituvchining guruhlari (darslardan)
-        $groups = Group::whereIn('id',
-            Schedule::where('teacher_id', $teacher->id)
-                ->distinct('group_id')
-                ->pluck('group_id')
-        )->orderBy('name')->get();
+        // Bugungi kun
+        $dayMap = [0 => 'Yak', 1 => 'Du', 2 => 'Se', 3 => 'Chor', 4 => 'Pay', 5 => 'Ju', 6 => 'Shan'];
+        $todayShort = $dayMap[now()->dayOfWeek] ?? null;
+        $todayDay = $todayShort ? Day::where('short', $todayShort)->first() : null;
 
-        // Har bir guruh uchun fanlar
-        $groupSubjects = [];
-        foreach ($groups as $g) {
-            $groupSubjects[$g->id] = Subject::whereIn('id',
-                Schedule::where('teacher_id', $teacher->id)
-                    ->where('group_id', $g->id)
-                    ->distinct('subject_id')
-                    ->pluck('subject_id')
-            )->orderBy('name')->get();
+        // Bugungi darslar (faqat shu o'qituvchi)
+        $todaySchedules = collect();
+        if ($todayDay) {
+            $todaySchedules = Schedule::with(['group', 'subject', 'period', 'room'])
+                ->where('teacher_id', $teacher->id)
+                ->where('day_id', $todayDay->id)
+                ->orderBy('period_id')
+                ->get();
         }
 
-        return view('teacher.journal', compact('teacher', 'groups', 'groupSubjects'));
+        // Guruh + fan bo'yicha guruhlash (faqat bugungilar)
+        $grouped = [];
+        foreach ($todaySchedules as $s) {
+            $key = $s->group_id . '_' . $s->subject_id;
+            if (!isset($grouped[$key])) {
+                $grouped[$key] = [
+                    'group' => $s->group,
+                    'subject' => $s->subject,
+                    'schedules' => collect(),
+                ];
+            }
+            $grouped[$key]['schedules']->push($s);
+        }
+
+        return view('teacher.journal', [
+            'teacher' => $teacher,
+            'todayDay' => $todayDay,
+            'grouped' => $grouped,
+        ]);
     }
 
-    /** Jurnal — baho qo'yish sahifasi */
-    public function journalEdit(Group $group, Subject $subject)
+    /** Jurnal — aniq guruh + fan */
+    public function journalEdit(Request $request, $groupId, $subjectId)
     {
         $teacher = auth()->user();
+        $group = \App\Models\Group::findOrFail($groupId);
+        $subject = \App\Models\Subject::findOrFail($subjectId);
 
-        // Tekshirish: bu o'qituvchi shu guruhda shu fandan dars o'tadimi?
-        $hasAccess = Schedule::where('teacher_id', $teacher->id)
-            ->where('group_id', $group->id)
-            ->where('subject_id', $subject->id)
-            ->exists();
+        $schedules = Schedule::where('teacher_id', $teacher->id)
+            ->where('group_id', $groupId)
+            ->where('subject_id', $subjectId)
+            ->get();
 
-        if (!$hasAccess) {
+        if ($schedules->isEmpty()) {
             abort(403, 'Siz bu guruhda bu fandan dars o‘tamaysiz.');
         }
 
-        // Guruhdagi talabalar
         $students = $group->students()
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get();
 
-        // Har bir talabaning baholari (bu fandan)
-        $grades = Grade::where('subject_id', $subject->id)
-            ->whereIn('student_id', $students->pluck('id'))
-            ->get()
-            ->keyBy('student_id');
+        // Bugungi kun
+        $dayMap = [0 => 'Yak', 1 => 'Du', 2 => 'Se', 3 => 'Chor', 4 => 'Pay', 5 => 'Ju', 6 => 'Shan'];
+        $todayShort = $dayMap[now()->dayOfWeek] ?? null;
+        $todayDay = $todayShort ? Day::where('short', $todayShort)->first() : null;
+
+        $todaySchedules = collect();
+        if ($todayDay) {
+            $todaySchedules = Schedule::with(['period'])
+                ->where('teacher_id', $teacher->id)
+                ->where('group_id', $groupId)
+                ->where('subject_id', $subjectId)
+                ->where('day_id', $todayDay->id)
+                ->orderBy('period_id')
+                ->get();
+        }
+
+        $today = today()->toDateString();
+        $scheduleIds = $todaySchedules->pluck('id');
+
+        // ✅ Davomat — key: "student_id_schedule_id"
+        $todayAttendances = [];
+        if ($scheduleIds->count() > 0) {
+            $attRows = Attendance::whereIn('student_id', $students->pluck('id'))
+                ->whereIn('schedule_id', $scheduleIds)
+                ->where('date', $today)
+                ->get();
+
+            foreach ($attRows as $a) {
+                $todayAttendances[$a->student_id . '_' . $a->schedule_id] = $a->status;
+            }
+        }
+
+        // ✅ Baholar — key: "student_id_schedule_id"
+        $todayGrades = [];
+        if ($scheduleIds->count() > 0) {
+            $gradeRows = Grade::whereIn('student_id', $students->pluck('id'))
+                ->where('subject_id', $subjectId)
+                ->whereIn('schedule_id', $scheduleIds)
+                ->where('date', $today)
+                ->get();
+
+            foreach ($gradeRows as $g) {
+                $todayGrades[$g->student_id . '_' . $g->schedule_id] = $g->lesson_score;
+            }
+        }
 
         return view('teacher.journal-edit', compact(
-            'teacher', 'group', 'subject', 'students', 'grades'
+            'teacher',
+            'group',
+            'subject',
+            'todayDay',
+            'todaySchedules',
+            'students',
+            'todayAttendances',
+            'todayGrades'
         ));
     }
-
-    /** Bahoni saqlash */
-    public function journalSave(Request $request, Group $group, Subject $subject)
+    /** Baho + davomat saqlash */
+    public function journalSave(Request $request, $groupId, $subjectId)
     {
+        \Log::info('=== journalSave ===');
+        \Log::info('group: ' . $groupId . ' subject: ' . $subjectId);
+        \Log::info('grades RAW:', $request->input('grades', []));
+        \Log::info('attendance RAW:', $request->input('attendance', []));
+
+        
         $teacher = auth()->user();
 
         $hasAccess = Schedule::where('teacher_id', $teacher->id)
-            ->where('group_id', $group->id)
-            ->where('subject_id', $subject->id)
+            ->where('group_id', $groupId)
+            ->where('subject_id', $subjectId)
             ->exists();
 
         if (!$hasAccess) {
@@ -138,27 +210,73 @@ class DashboardController extends Controller
         }
 
         $data = $request->validate([
-            'grades'   => 'nullable|array',
-            'grades.*' => 'nullable|integer|min:0|max:10',
+            'grades' => 'array',
+            'grades.*' => 'array',
+            'grades.*.*' => 'nullable|integer|min:0|max:10',
+            'attendance' => 'array',
+            'attendance.*' => 'array',
+            'attendance.*.*' => 'nullable|in:b,s,nb',
         ]);
 
-        $date = now()->toDateString();
+        $date = today()->toDateString();
+        $savedGrades = 0;
+        $savedAtt = 0;
 
-        foreach ($data['grades'] ?? [] as $studentId => $score) {
-            if ($score === null || $score === '') continue;
+        // Baholarni saqlash — grades[student_id][schedule_id] = score
+        foreach ($data['grades'] ?? [] as $studentId => $scheduleGrades) {
+            if (!is_array($scheduleGrades))
+                continue;
 
-            Grade::updateOrCreate(
-                [
-                    'student_id' => $studentId,
-                    'subject_id' => $subject->id,
-                    'date'       => $date,
-                ],
-                [
-                    'lesson_score' => $score,
-                ]
-            );
+            foreach ($scheduleGrades as $scheduleId => $score) {
+                if ($score === null || $score === '') {
+                    // O'chirish
+                    Grade::where('student_id', $studentId)
+                        ->where('subject_id', $subjectId)
+                        ->where('schedule_id', $scheduleId)
+                        ->where('date', $date)
+                        ->delete();
+                    continue;
+                }
+
+                Grade::updateOrCreate(
+                    [
+                        'student_id' => $studentId,
+                        'subject_id' => $subjectId,
+                        'schedule_id' => $scheduleId,
+                        'date' => $date,
+                    ],
+                    ['lesson_score' => $score]
+                );
+                $savedGrades++;
+            }
         }
 
-        return back()->with('ok', 'Baholar saqlandi.');
+        // Davomatni saqlash — attendance[student_id][schedule_id] = status
+        foreach ($data['attendance'] ?? [] as $studentId => $scheduleAtts) {
+            if (!is_array($scheduleAtts))
+                continue;
+
+            foreach ($scheduleAtts as $scheduleId => $status) {
+                if (empty($status)) {
+                    Attendance::where('student_id', $studentId)
+                        ->where('schedule_id', $scheduleId)
+                        ->where('date', $date)
+                        ->delete();
+                    continue;
+                }
+
+                Attendance::updateOrCreate(
+                    [
+                        'student_id' => $studentId,
+                        'schedule_id' => $scheduleId,
+                        'date' => $date,
+                    ],
+                    ['status' => $status]
+                );
+                $savedAtt++;
+            }
+        }
+
+        return back()->with('ok', "Saqlandi: {$savedGrades} ta baho, {$savedAtt} ta davomat.");
     }
 }
