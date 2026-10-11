@@ -21,8 +21,8 @@ class StarostaController extends Controller
             $q = $request->search;
             $query->where(function ($w) use ($q) {
                 $w->where('first_name', 'ILIKE', "%{$q}%")
-                  ->orWhere('last_name', 'ILIKE', "%{$q}%")
-                  ->orWhere('email', 'ILIKE', "%{$q}%");
+                    ->orWhere('last_name', 'ILIKE', "%{$q}%")
+                    ->orWhere('email', 'ILIKE', "%{$q}%");
             });
         }
 
@@ -36,44 +36,75 @@ class StarostaController extends Controller
         $groups = Group::orderBy('course')->orderBy('name')->get();
         return view('admin.starostas.form', [
             'starosta' => new User(),
-            'groups'   => $groups,
+            'groups' => $groups,
         ]);
     }
 
     public function store(Request $request)
     {
         $data = $request->validate([
-            'first_name'  => 'required|string|max:50',
-            'last_name'   => 'required|string|max:50',
+            'first_name' => 'required|string|max:50',
+            'last_name' => 'required|string|max:50',
             'middle_name' => 'nullable|string|max:50',
-            'email'       => 'required|email|unique:users,email',
-            'phone'       => 'nullable|string|max:20',
-            'password'    => 'required|string|min:6',
-            'group_id'    => 'required|exists:groups,id',
-        ], [
-            'email.unique' => 'Bu email allaqachon ro‘yxatdan o‘tgan.',
+            'email' => 'required|email',
+            'phone' => 'nullable|string|max:20',
+            'password' => 'nullable|string|min:6',
+            'group_id' => 'required|exists:groups,id',
         ]);
 
-        $starosta = User::create([
-            'role_id'     => 3,
-            'first_name'  => $data['first_name'],
-            'last_name'   => $data['last_name'],
-            'middle_name' => $data['middle_name'] ?? null,
-            'email'       => $data['email'],
-            'phone'       => $data['phone'] ?? null,
-            'password'    => Hash::make($data['password']),
-            'is_active'   => true,
-        ]);
+        // ✅ Avval DB'da email bor-yo'qligini tekshiramiz
+        $starosta = User::where('email', $data['email'])->first();
 
-        // Guruhga starosta qilib belgilash
+        if ($starosta) {
+            // ============ MAVJUD USER — faqat yangilash ============
+            $update = [
+                'first_name' => $data['first_name'],
+                'last_name' => $data['last_name'],
+                'middle_name' => $data['middle_name'] ?? $starosta->middle_name,
+                'phone' => $data['phone'] ?? $starosta->phone,
+                'role_id' => 3,  // Talaba roliga o'tkazamiz
+            ];
+
+            // Agar parol kiritilgan bo'lsa — yangilaymiz
+            if (!empty($data['password'])) {
+                $update['password'] = Hash::make($data['password']);
+            }
+
+            $starosta->update($update);
+
+            $message = "{$starosta->last_name} {$starosta->first_name} mavjud edi — starosta qilib belgilandi.";
+        } else {
+            // ============ YANGI USER — yaratamiz ============
+            $starosta = User::create([
+                'role_id' => 3,
+                'first_name' => $data['first_name'],
+                'last_name' => $data['last_name'],
+                'middle_name' => $data['middle_name'] ?? null,
+                'email' => $data['email'],
+                'phone' => $data['phone'] ?? null,
+                'password' => Hash::make($data['password'] ?? 'parol123'),
+                'is_active' => true,
+            ]);
+
+            $message = "Yangi starosta qo'shildi.";
+        }
+
+        // ============ Guruhga starosta qilib belgilash ============
         $group = Group::find($data['group_id']);
+
+        // Avvalgi guruhdan olib tashlash (agar boshqa guruhda starosta bo'lsa)
+        Group::where('starosta_id', $starosta->id)
+            ->where('id', '!=', $group->id)
+            ->update(['starosta_id' => null]);
+
+        // Yangi guruhga biriktirish
         $group->update(['starosta_id' => $starosta->id]);
 
-        // Talabalar ro'yxatiga ham qo'shish
+        // Guruh talabalariga qo'shish
         $group->students()->syncWithoutDetaching([$starosta->id]);
 
         return redirect()->route('admin.starostas.index')
-                         ->with('ok', "Starosta qo'shildi va {$group->name} guruhiga biriktirildi.");
+            ->with('ok', $message . " Guruh: {$group->name}");
     }
 
     public function edit(User $starosta)
@@ -87,8 +118,8 @@ class StarostaController extends Controller
         $currentGroup = $starosta->starostaGroups()->first();
 
         return view('admin.starostas.form', [
-            'starosta'     => $starosta,
-            'groups'       => $groups,
+            'starosta' => $starosta,
+            'groups' => $groups,
             'currentGroup' => $currentGroup,
         ]);
     }
@@ -100,21 +131,21 @@ class StarostaController extends Controller
         }
 
         $data = $request->validate([
-            'first_name'  => 'required|string|max:50',
-            'last_name'   => 'required|string|max:50',
+            'first_name' => 'required|string|max:50',
+            'last_name' => 'required|string|max:50',
             'middle_name' => 'nullable|string|max:50',
-            'email'       => ['required', 'email', Rule::unique('users', 'email')->ignore($starosta->id)],
-            'phone'       => 'nullable|string|max:20',
-            'password'    => 'nullable|string|min:6',
-            'group_id'    => 'required|exists:groups,id',
+            'email' => ['required', 'email', Rule::unique('users', 'email')->ignore($starosta->id)],
+            'phone' => 'nullable|string|max:20',
+            'password' => 'nullable|string|min:6',
+            'group_id' => 'required|exists:groups,id',
         ]);
 
         $update = [
-            'first_name'  => $data['first_name'],
-            'last_name'   => $data['last_name'],
+            'first_name' => $data['first_name'],
+            'last_name' => $data['last_name'],
             'middle_name' => $data['middle_name'] ?? null,
-            'email'       => $data['email'],
-            'phone'       => $data['phone'] ?? null,
+            'email' => $data['email'],
+            'phone' => $data['phone'] ?? null,
         ];
 
         if (!empty($data['password'])) {
@@ -133,7 +164,7 @@ class StarostaController extends Controller
         $group->students()->syncWithoutDetaching([$starosta->id]);
 
         return redirect()->route('admin.starostas.index')
-                         ->with('ok', 'Starosta yangilandi.');
+            ->with('ok', 'Starosta yangilandi.');
     }
 
     public function destroy(User $starosta)

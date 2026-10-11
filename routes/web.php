@@ -46,12 +46,19 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
         ]);
     })->name('dashboard');
 
+    // CRUD
     Route::resource('schedules', ScheduleController::class);
     Route::resource('teachers',  TeacherController::class);
     Route::resource('subjects',  SubjectController::class);
     Route::resource('rooms',     RoomController::class);
     Route::resource('groups',    GroupController::class);
-    Route::resource('starostas', StarostaController::class);  // ← ENDI ICHIDA ✅
+    Route::resource('starostas', StarostaController::class);
+
+    // Guruhga talaba qo'shish/olib tashlash
+    Route::post('groups/{group}/add-student',
+        [GroupController::class, 'addStudent'])->name('groups.add-student');
+    Route::delete('groups/{group}/remove-student/{student}',
+        [GroupController::class, 'removeStudent'])->name('groups.remove-student');
 
     // Analitika
     Route::get('analytics',                   [AnalyticsController::class, 'index'])->name('analytics.index');
@@ -71,13 +78,5 @@ Route::middleware(['auth', 'teacher'])->prefix('teacher')->name('teacher.')->gro
 // ==================== STAROSTA PANELI ====================
 Route::middleware(['auth', 'starosta'])->prefix('starosta')->name('starosta.')->group(function () {
     Route::get('/journal', [\App\Http\Controllers\Starosta\DashboardController::class, 'journal'])->name('journal');
-});
-
-// ==================== STAROSTA PANELI ====================
-Route::middleware(['auth', 'starosta'])->prefix('starosta')->name('starosta.')->group(function () {
-    Route::get('/journal', [\App\Http\Controllers\Starosta\DashboardController::class, 'journal'])->name('journal');
     Route::post('/journal', [\App\Http\Controllers\Starosta\DashboardController::class, 'save'])->name('journal.save');
 });
-
-Route::post('groups/{group}/add-student', [GroupController::class, 'addStudent'])->name('groups.add-student');
-Route::delete('groups/{group}/remove-student/{student}', [GroupController::class, 'removeStudent'])->name('groups.remove-student');
