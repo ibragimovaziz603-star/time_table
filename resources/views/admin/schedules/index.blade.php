@@ -82,14 +82,19 @@
                       </svg>
                     </a>
 
+                    {{-- O'qituvchi (null bo'lsa — '—') --}}
                     <div style="font-size:10px;font-weight:700;color:#fff;opacity:.85;padding-right:22px;">
-                      {{ $lesson->teacher->last_name }}
+                      {{ $lesson->teacher ? $lesson->teacher->last_name : '—' }}
                     </div>
+
+                    {{-- Fan (null bo'lsa — '—') --}}
                     <div style="font-size:11.5px;font-weight:700;color:#fff;margin:2px 0;line-height:1.25;">
-                      {{ $lesson->subject->name }}
+                      {{ $lesson->subject?->name ?? '—' }}
                     </div>
+
+                    {{-- Xona (null bo'lsa — '—') --}}
                     <div style="font-size:10px;color:rgba(255,255,255,0.7);">
-                      {{ $lesson->room->name }}
+                      {{ $lesson->room?->name ?? '—' }}
                     </div>
                   </div>
 
