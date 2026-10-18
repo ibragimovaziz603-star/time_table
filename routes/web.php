@@ -35,16 +35,11 @@ Route::post('/register', [RegisterController::class, 'register']);
 // ==================== ADMIN PANEL ====================
 Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(function () {
 
-    // Dashboard — 3 ta statistika
-    Route::get('/', function () {
-        return view('admin.dashboard', [
-            'stats' => [
-                'students' => User::where('role_id', 3)->count(),
-                'teachers' => User::where('role_id', 2)->count(),
-                'visits'   => Visit::count(),
-            ],
-        ]);
-    })->name('dashboard');
+    // ✅ Dashboard — endi Controller orqali (chart ma'lumotlari bilan)
+    Route::get('/', [AnalyticsController::class, 'index'])->name('dashboard');
+
+    // ✅ Real-time chart uchun API
+    Route::get('/api/chart-data', [AnalyticsController::class, 'chartData'])->name('chart.data');
 
     // CRUD
     Route::resource('schedules', ScheduleController::class);
